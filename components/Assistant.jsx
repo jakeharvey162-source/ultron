@@ -65,8 +65,10 @@ export default function Assistant() {
   const [aboutYouInput, setAboutYouInput] = useState("");
   const [language, setLanguage] = useState("en-US");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState(null);
 
   const scrollRef = useRef(null);
+  const inputFieldRef = useRef(null);
   const recognitionRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -171,6 +173,14 @@ export default function Assistant() {
     setLanguage(lang);
     languageRef.current = lang;
     try { window.localStorage.setItem("ultron:lang", lang); } catch (e) {}
+  }, []);
+
+  const copyMessage = useCallback(async (text, idx) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIdx(idx);
+      setTimeout(() => setCopiedIdx((prev) => (prev === idx ? null : prev)), 1600);
+    } catch (e) {}
   }, []);
 
   const openSite = useCallback((url, label) => {
@@ -394,6 +404,12 @@ export default function Assistant() {
         >
           🌍 World Pulse
         </button>
+        <button
+          onClick={() => { setInput("Help me draft "); inputFieldRef.current?.focus(); }}
+          className="font-body text-[13px] font-medium px-3.5 py-1.5 whitespace-nowrap flex-shrink-0 rounded-full bg-surface text-muted hover:text-text hover:bg-surface2 transition-colors"
+        >
+          ✍️ Draft
+        </button>
         {QUICK_LAUNCH.map((q) => (
           <button key={q.label} onClick={() => openSite(q.url, q.label)} className="font-body text-[13px] font-medium px-3.5 py-1.5 whitespace-nowrap flex-shrink-0 rounded-full bg-surface text-muted hover:text-text hover:bg-surface2 transition-colors">
             {q.label}
@@ -435,9 +451,20 @@ export default function Assistant() {
                     {m.system ? (
                       <div className="font-body text-xs text-faint italic px-1">{m.content}</div>
                     ) : (
-                      <div className={`font-body text-[14.5px] leading-relaxed px-4 py-3 rounded-2xl whitespace-pre-wrap ${m.role === "user" ? "bg-accent/15 text-text rounded-br-md" : "bg-surface text-text rounded-bl-md"}`}>
-                        {m.image && <img src={m.image} alt="captured" className="max-w-full mb-2 rounded-xl" style={{ maxHeight: 200 }} />}
-                        {m.content}
+                      <div className="group relative">
+                        <div className={`font-body text-[14.5px] leading-relaxed px-4 py-3 rounded-2xl whitespace-pre-wrap ${m.role === "user" ? "bg-accent/15 text-text rounded-br-md" : "bg-surface text-text rounded-bl-md"}`}>
+                          {m.image && <img src={m.image} alt="captured" className="max-w-full mb-2 rounded-xl" style={{ maxHeight: 200 }} />}
+                          {m.content}
+                        </div>
+                        {m.role === "assistant" && (
+                          <button
+                            onClick={() => copyMessage(m.content, i)}
+                            aria-label="Copy to clipboard"
+                            className="absolute -bottom-2 right-2 text-[10px] font-mono px-2 py-1 rounded-full bg-surface2 text-faint opacity-40 sm:opacity-0 sm:group-hover:opacity-100 hover:opacity-100 focus:opacity-100 transition-opacity hover:text-text"
+                          >
+                            {copiedIdx === i ? "copied" : "copy"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -479,7 +506,7 @@ export default function Assistant() {
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
                 </button>
               )}
-              <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendMessage(input, pendingImage)} placeholder={`Ask ${name} anything`} className="font-body flex-1 min-w-0 outline-none text-[14.5px] bg-transparent px-2 text-text placeholder:text-faint" />
+              <input ref={inputFieldRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendMessage(input, pendingImage)} placeholder={`Ask ${name} anything`} className="font-body flex-1 min-w-0 outline-none text-[14.5px] bg-transparent px-2 text-text placeholder:text-faint" />
               <button onClick={() => sendMessage(input, pendingImage)} disabled={(!input.trim() && !pendingImage) || thinking} aria-label="Send" className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-accent text-bg disabled:opacity-25 transition-opacity">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
               </button>
