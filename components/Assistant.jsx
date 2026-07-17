@@ -387,6 +387,13 @@ export default function Assistant() {
 
       {/* Quick launch */}
       <div className="flex items-center gap-2 px-5 sm:px-8 pb-3 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: "none" }}>
+        <button
+          onClick={() => sendMessage("Give me a world pulse: the 4-5 biggest things happening globally right now. For each, a bold-style short headline then one or two sentences of real substance, pulling from current sources. Cover a mix of world affairs, business/tech, and one lighter cultural story. Then a one-line 'why it matters' close. Keep the whole thing tight and scannable.")}
+          disabled={thinking}
+          className="font-body text-[13px] font-medium px-3.5 py-1.5 whitespace-nowrap flex-shrink-0 rounded-full bg-accent/15 text-accent hover:bg-accent/25 transition-colors disabled:opacity-40"
+        >
+          🌍 World Pulse
+        </button>
         {QUICK_LAUNCH.map((q) => (
           <button key={q.label} onClick={() => openSite(q.url, q.label)} className="font-body text-[13px] font-medium px-3.5 py-1.5 whitespace-nowrap flex-shrink-0 rounded-full bg-surface text-muted hover:text-text hover:bg-surface2 transition-colors">
             {q.label}
@@ -408,10 +415,10 @@ export default function Assistant() {
       {/* Segmented tabs */}
       <div className="px-5 sm:px-8 pb-4 flex-shrink-0">
         <div className="relative inline-flex bg-surface rounded-full p-1">
-          {["command", "3d"].map((t) => (
+          {["command", "pulse", "3d"].map((t) => (
             <button key={t} onClick={() => setTab(t)} className="relative font-body text-[13px] font-semibold px-4 py-1.5 rounded-full z-10 transition-colors" style={{ color: tab === t ? "#0B0B0D" : "#8C8A8A" }}>
               {tab === t && <motion.div layoutId="tabPill" className="absolute inset-0 bg-accent rounded-full -z-10" transition={{ type: "spring", stiffness: 400, damping: 32 }} />}
-              {t === "command" ? "Command" : "3D View"}
+              {t === "command" ? "Command" : t === "pulse" ? "Pulse" : "3D View"}
             </button>
           ))}
         </div>
