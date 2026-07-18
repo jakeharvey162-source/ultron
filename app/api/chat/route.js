@@ -130,7 +130,13 @@ export async function POST(req) {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const provider = (process.env.AI_PROVIDER || "anthropic").toLowerCase();
+  const provider = (
+    process.env.AI_PROVIDER ||
+    (process.env.NVIDIA_API_KEY && "nvidia") ||
+    (process.env.GEMINI_API_KEY && "gemini") ||
+    (process.env.ANTHROPIC_API_KEY && "anthropic") ||
+    "anthropic"
+  ).toLowerCase();
 
   try {
     let result;
