@@ -105,7 +105,7 @@ async function callNvidia({ system, messages }) {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) return { error: "Missing NVIDIA_API_KEY. Add it in Vercel's Environment Variables, then redeploy.", status: 500 };
 
-  const model = process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct";
+  const model = process.env.NVIDIA_MODEL || "meta/llama-3.1-8b-instruct";
   const upstream = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
