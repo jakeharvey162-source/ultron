@@ -38,6 +38,11 @@ export async function POST(req) {
     });
 
     const data = await upstream.json();
+    if (!upstream.ok) {
+      console.error("Anthropic API error", upstream.status, JSON.stringify(data));
+      const msg = data?.error?.message || data?.message || "Unknown upstream error.";
+      return Response.json({ error: `Anthropic API error (${upstream.status}): ${msg}` }, { status: upstream.status });
+    }
     return Response.json(data, { status: upstream.status });
   } catch (e) {
     return Response.json({ error: "Upstream request to Anthropic failed." }, { status: 502 });
