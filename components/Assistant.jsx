@@ -285,15 +285,20 @@ export default function Assistant() {
         ? `What you know about this specific person, from what they've told you before — use it naturally, don't just recite it back: ${aboutYou.trim()}\n\n`
         : "";
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 55000);
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           system: `${memoryBlock}You are ${name}, this person's personal command-center assistant, styled after a sharp human expert, not a chipper robot. Strengths: business & IT strategy/troubleshooting/code; tutoring any high school or university subject; real-world lookups via web search for business info, job postings, and market/financial data. On markets: report real facts and news, present multiple angles, never give a buy/sell call or confident prediction. On job search: find real postings and draft a strong tailored resume or cover letter, but you cannot submit applications or send emails yourself. You cannot control the user's OS or open native desktop apps. If given an image, describe and analyze what's relevant in it clearly and usefully. You may be speaking to them out loud via text-to-speech, so keep replies conversational and not overly long unless real depth is asked for. Keep answers tight by default; go deeper when asked.`,
           messages: apiMessages,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
         }),
       });
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       const textBlocks = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
@@ -301,7 +306,11 @@ export default function Assistant() {
       setMessages((prev) => [...prev, { role: "assistant", content: reply, ts: Date.now() }]);
       speak(reply, callModeRef.current);
     } catch (e) {
-      setError(typeof e.message === "string" ? e.message : "Connection dropped. Try again.");
+      if (e.name === "AbortError") {
+        setError("The AI provider took over 55 seconds and timed out. NVIDIA's free tier can be slow under load — try again, or switch AI_PROVIDER to gemini or anthropic in Vercel's environment variables for a faster response.");
+      } else {
+        setError(typeof e.message === "string" ? e.message : "Connection dropped. Try again.");
+      }
     } finally {
       setThinking(false);
     }

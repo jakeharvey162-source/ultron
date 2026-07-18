@@ -4,6 +4,11 @@
 // frontend: { content: [{ type: "text", text: "..." }] }, so Assistant.jsx never
 // needs to know or care which backend is running.
 
+// Some providers (notably NVIDIA's free tier under load) can take a while to
+// respond. Without this, Vercel's default ~10-15s limit kills the function
+// with no error message at all — which looks exactly like infinite loading.
+export const maxDuration = 60;
+
 function normalizeAnthropicMessages(messages) {
   // Already in Anthropic's content-block shape — pass through.
   return messages;
