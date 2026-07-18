@@ -30,6 +30,21 @@ function detectScene(text) {
   return null;
 }
 
+function parseDirections(text) {
+  let m = text.match(/(?:directions?|map|navigate|route)\s+from\s+(.+?)\s+to\s+(.+)/i);
+  if (m) return { origin: m[1].trim(), destination: m[2].trim() };
+  m = text.match(/(?:directions?|map|navigate|route)\s+to\s+(.+?)\s+from\s+(.+)/i);
+  if (m) return { origin: m[2].trim(), destination: m[1].trim() };
+  m = text.match(/(?:directions?|navigate|route)\s+to\s+(.+)/i);
+  if (m) return { origin: null, destination: m[1].trim() };
+  return null;
+}
+
+function parseGoogleSearch(text) {
+  const m = text.match(/^(?:go to google and |go to google,? )?search(?: google)?(?: for)?\s+(.+)/i);
+  return m ? m[1].trim() : null;
+}
+
 function safeGet(key, fallback) {
   if (typeof window === "undefined") return fallback;
   try {
@@ -194,6 +209,33 @@ export default function Assistant() {
     if (thinking) return;
 
     if (!imageDataUrl) {
+      const directions = parseDirections(trimmed);
+      if (directions) {
+        setInput("");
+        setMessages((prev) => [...prev, { role: "user", content: trimmed, ts: Date.now() }]);
+        const url = directions.origin
+          ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(directions.origin)}&destination=${encodeURIComponent(directions.destination)}`
+          : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(directions.destination)}`;
+        window.open(url, "_blank", "noopener,noreferrer");
+        const confirmMsg = directions.origin
+          ? `Pulling up directions from ${directions.origin} to ${directions.destination} on Google Maps now.`
+          : `Pulling up directions to ${directions.destination} on Google Maps now.`;
+        setMessages((prev) => [...prev, { role: "assistant", content: confirmMsg, ts: Date.now() }]);
+        speak(confirmMsg, callModeRef.current);
+        return;
+      }
+
+      const searchQuery = parseGoogleSearch(trimmed);
+      if (searchQuery) {
+        setInput("");
+        setMessages((prev) => [...prev, { role: "user", content: trimmed, ts: Date.now() }]);
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`, "_blank", "noopener,noreferrer");
+        const confirmMsg = `Done — searching Google for "${searchQuery}" now.`;
+        setMessages((prev) => [...prev, { role: "assistant", content: confirmMsg, ts: Date.now() }]);
+        speak(confirmMsg, callModeRef.current);
+        return;
+      }
+
       const openMatch = trimmed.match(/^open\s+(.+)$/i);
       if (openMatch) {
         const key = openMatch[1].trim().toLowerCase();
@@ -201,10 +243,14 @@ export default function Assistant() {
           setInput("");
           setMessages((prev) => [...prev, { role: "user", content: trimmed, ts: Date.now() }]);
           if (OPEN_MAP[key] === null) {
-            setMessages((prev) => [...prev, { role: "assistant", content: "Can't launch Chrome itself from inside a browser tab — but I can open any site in a new tab. Try \"open gmail.\"", ts: Date.now() }]);
+            const msg = "Can't launch Chrome itself from inside a browser tab — but I can open any site in a new tab. Try \"open gmail.\"";
+            setMessages((prev) => [...prev, { role: "assistant", content: msg, ts: Date.now() }]);
+            speak(msg, callModeRef.current);
           } else {
             window.open(OPEN_MAP[key], "_blank", "noopener,noreferrer");
-            setMessages((prev) => [...prev, { role: "assistant", content: `Opened ${openMatch[1].trim()}.`, ts: Date.now() }]);
+            const msg = `Opened ${openMatch[1].trim()}.`;
+            setMessages((prev) => [...prev, { role: "assistant", content: msg, ts: Date.now() }]);
+            speak(msg, callModeRef.current);
           }
           return;
         }
