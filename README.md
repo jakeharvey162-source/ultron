@@ -22,11 +22,15 @@ A personal AI command center — real voice-to-voice conversation, a wake word, 
 
 ## Setup
 
-The chat feature needs your own Anthropic API key, used only server-side (never exposed to the browser):
+Ultron works with three different AI providers — pick whichever you have a key for. All calls happen server-side, so your key is never exposed to the browser.
 
-1. Get a key at https://console.anthropic.com (Settings → API Keys)
-2. Copy `.env.example` to `.env.local` and paste your key in, **or** for a deployed site, add `ANTHROPIC_API_KEY` in your Vercel project's Settings → Environment Variables (for both Production and Preview)
-3. Redeploy / restart the dev server
+1. Copy `.env.example` to `.env.local` (or add these in Vercel's Settings → Environment Variables for a deployed site)
+2. Set `AI_PROVIDER` to `anthropic`, `gemini`, or `nvidia`
+3. Add the matching API key:
+   - **Anthropic**: `ANTHROPIC_API_KEY` from https://console.anthropic.com — full web search + vision
+   - **Gemini**: `GEMINI_API_KEY` from https://aistudio.google.com/apikey — has its own Google Search grounding + vision
+   - **NVIDIA NIM**: `NVIDIA_API_KEY` from https://build.nvidia.com — cheapest option, open models, but **no web search** (can't look up real-time news/prices/jobs) and vision only on vision-capable models
+4. Redeploy / restart the dev server
 
 ```bash
 npm install
