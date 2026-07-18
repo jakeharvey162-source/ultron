@@ -1,87 +1,70 @@
-// Provider-agnostic chat endpoint. Switch providers with the AI_PROVIDER env var:
-//   AI_PROVIDER=anthropic (default) | gemini | nvidia
-// Whichever provider is chosen, this route always returns the same shape to the
-// frontend: { content: [{ type: "text", text: "..." }] }, so Assistant.jsx never
-// needs to know or care which backend is running.
+// Provider-agnostic chat endpoint with automatic failover.
+// Configure any combination of ANTHROPIC_API_KEY, GEMINI_API_KEY, NVIDIA_API_KEY.
+// AI_PROVIDER (optional) picks which one to try FIRST — if it's slow or errors,
+// the request automatically retries with the next configured provider, silently,
+// so the user never sees an intermediate failure. Only if every configured
+// provider fails does the user see an error.
+//
+// Whichever provider ultimately answers, this route always returns the same
+// shape to the frontend: { content: [{ type: "text", text: "..." }] }.
 
-// Some providers (notably NVIDIA's free tier under load) can take a while to
-// respond. Without this, Vercel's default ~10-15s limit kills the function
-// with no error message at all — which looks exactly like infinite loading.
 export const maxDuration = 60;
-
-function normalizeAnthropicMessages(messages) {
-  // Already in Anthropic's content-block shape — pass through.
-  return messages;
-}
+const PER_PROVIDER_TIMEOUT_MS = 18000;
 
 function toGeminiContents(messages) {
   return messages.map((m) => {
     const role = m.role === "assistant" ? "model" : "user";
-    if (typeof m.content === "string") {
-      return { role, parts: [{ text: m.content }] };
-    }
-    const parts = (m.content || []).map((block) => {
-      if (block.type === "image") {
-        return { inline_data: { mime_type: block.source.media_type, data: block.source.data } };
-      }
-      return { text: block.text || "" };
-    });
+    if (typeof m.content === "string") return { role, parts: [{ text: m.content }] };
+    const parts = (m.content || []).map((block) =>
+      block.type === "image"
+        ? { inline_data: { mime_type: block.source.media_type, data: block.source.data } }
+        : { text: block.text || "" }
+    );
     return { role, parts };
   });
 }
 
 function toOpenAIMessages(messages) {
   return messages.map((m) => {
-    if (typeof m.content === "string") {
-      return { role: m.role, content: m.content };
-    }
-    const content = (m.content || []).map((block) => {
-      if (block.type === "image") {
-        return { type: "image_url", image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` } };
-      }
-      return { type: "text", text: block.text || "" };
-    });
+    if (typeof m.content === "string") return { role: m.role, content: m.content };
+    const content = (m.content || []).map((block) =>
+      block.type === "image"
+        ? { type: "image_url", image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` } }
+        : { type: "text", text: block.text || "" }
+    );
     return { role: m.role, content };
   });
 }
 
-async function callAnthropic({ system, messages, tools }) {
+async function callAnthropic({ system, messages, tools }, signal) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { error: "Missing ANTHROPIC_API_KEY. Add it in Vercel's Environment Variables, then redeploy.", status: 500 };
+  if (!apiKey) throw new Error("no ANTHROPIC_API_KEY configured");
 
   const upstream = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
+    signal,
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
       max_tokens: 1500,
       system,
-      messages: normalizeAnthropicMessages(messages),
+      messages,
       tools: tools || undefined,
     }),
   });
-
   const data = await upstream.json();
-  if (!upstream.ok) {
-    console.error("Anthropic API error", upstream.status, JSON.stringify(data));
-    const msg = data?.error?.message || data?.message || "Unknown upstream error.";
-    return { error: `Anthropic API error (${upstream.status}): ${msg}`, status: upstream.status };
-  }
-  // Already in the normalized shape.
-  return { data, status: 200 };
+  if (!upstream.ok) throw new Error(`Anthropic ${upstream.status}: ${data?.error?.message || "unknown error"}`);
+  return data;
 }
 
-async function callGemini({ system, messages }) {
+async function callGemini({ system, messages }, signal) {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { error: "Missing GEMINI_API_KEY. Add it in Vercel's Environment Variables, then redeploy.", status: 500 };
+  if (!apiKey) throw new Error("no GEMINI_API_KEY configured");
 
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
@@ -89,25 +72,20 @@ async function callGemini({ system, messages }) {
       tools: [{ google_search: {} }],
     }),
   });
-
   const data = await upstream.json();
-  if (!upstream.ok) {
-    console.error("Gemini API error", upstream.status, JSON.stringify(data));
-    const msg = data?.error?.message || "Unknown upstream error.";
-    return { error: `Gemini API error (${upstream.status}): ${msg}`, status: upstream.status };
-  }
-
+  if (!upstream.ok) throw new Error(`Gemini ${upstream.status}: ${data?.error?.message || "unknown error"}`);
   const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-  return { data: { content: [{ type: "text", text }] }, status: 200 };
+  return { content: [{ type: "text", text }] };
 }
 
-async function callNvidia({ system, messages }) {
+async function callNvidia({ system, messages }, signal) {
   const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) return { error: "Missing NVIDIA_API_KEY. Add it in Vercel's Environment Variables, then redeploy.", status: 500 };
+  if (!apiKey) throw new Error("no NVIDIA_API_KEY configured");
 
   const model = process.env.NVIDIA_MODEL || "meta/llama-3.1-8b-instruct";
   const upstream = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
@@ -115,16 +93,38 @@ async function callNvidia({ system, messages }) {
       messages: [{ role: "system", content: system }, ...toOpenAIMessages(messages)],
     }),
   });
-
   const data = await upstream.json();
-  if (!upstream.ok) {
-    console.error("NVIDIA API error", upstream.status, JSON.stringify(data));
-    const msg = data?.error?.message || data?.message || "Unknown upstream error.";
-    return { error: `NVIDIA API error (${upstream.status}): ${msg}`, status: upstream.status };
-  }
-
+  if (!upstream.ok) throw new Error(`NVIDIA ${upstream.status}: ${data?.error?.message || "unknown error"}`);
   const text = data?.choices?.[0]?.message?.content || "";
-  return { data: { content: [{ type: "text", text }] }, status: 200 };
+  return { content: [{ type: "text", text }] };
+}
+
+const CALLERS = { anthropic: callAnthropic, gemini: callGemini, nvidia: callNvidia };
+
+// Fastest/most capable first by default; whatever AI_PROVIDER is set to jumps
+// to the front of the line, but everything configured is still a fallback.
+function buildProviderOrder() {
+  const configured = ["gemini", "anthropic", "nvidia"].filter((p) => {
+    if (p === "gemini") return !!process.env.GEMINI_API_KEY;
+    if (p === "anthropic") return !!process.env.ANTHROPIC_API_KEY;
+    if (p === "nvidia") return !!process.env.NVIDIA_API_KEY;
+    return false;
+  });
+  const preferred = process.env.AI_PROVIDER?.toLowerCase();
+  if (preferred && configured.includes(preferred)) {
+    return [preferred, ...configured.filter((p) => p !== preferred)];
+  }
+  return configured.length ? configured : ["anthropic"];
+}
+
+async function withTimeout(fn, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fn(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function POST(req) {
@@ -135,24 +135,22 @@ export async function POST(req) {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const provider = (
-    process.env.AI_PROVIDER ||
-    (process.env.NVIDIA_API_KEY && "nvidia") ||
-    (process.env.GEMINI_API_KEY && "gemini") ||
-    (process.env.ANTHROPIC_API_KEY && "anthropic") ||
-    "anthropic"
-  ).toLowerCase();
+  const order = buildProviderOrder();
+  const failures = [];
 
-  try {
-    let result;
-    if (provider === "gemini") result = await callGemini(body);
-    else if (provider === "nvidia") result = await callNvidia(body);
-    else result = await callAnthropic(body);
-
-    if (result.error) return Response.json({ error: result.error }, { status: result.status });
-    return Response.json(result.data, { status: result.status });
-  } catch (e) {
-    console.error("Provider request failed", provider, e.message);
-    return Response.json({ error: `Request to ${provider} failed: ${e.message}` }, { status: 502 });
+  for (const provider of order) {
+    try {
+      const data = await withTimeout((signal) => CALLERS[provider](body, signal), PER_PROVIDER_TIMEOUT_MS);
+      return Response.json(data, { status: 200 });
+    } catch (e) {
+      const reason = e.name === "AbortError" ? `${provider} timed out after ${PER_PROVIDER_TIMEOUT_MS / 1000}s` : `${provider}: ${e.message}`;
+      console.error("Provider attempt failed, trying next:", reason);
+      failures.push(reason);
+    }
   }
+
+  return Response.json(
+    { error: `All configured providers failed. Details: ${failures.join(" | ")}` },
+    { status: 502 }
+  );
 }
