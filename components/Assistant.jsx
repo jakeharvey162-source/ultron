@@ -95,6 +95,12 @@ export default function Assistant() {
   useEffect(() => {
     setSpeechSupported(!!(window.SpeechRecognition || window.webkitSpeechRecognition));
     setSynthSupported(!!window.speechSynthesis);
+    if (window.speechSynthesis) {
+      // Voices often load asynchronously; touching this early avoids the
+      // very first speak() call being silently ignored on some browsers.
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
     const storedName = safeGet("ultron:name", "Ultron");
     setName(storedName);
     setNameInput(storedName);
@@ -139,16 +145,6 @@ export default function Assistant() {
     try {
       window.speechSynthesis.cancel();
       const clean = text.replace(/[*_#`]/g, "");
-      const utter = new SpeechSynthesisUtterance(clean);
-      utter.rate = 1.03;
-      utter.pitch = 0.92;
-      utter.lang = languageRef.current;
-      utter.onstart = () => {
-        setSpeaking(true);
-        if (recognitionRef.current) {
-          try { recognitionRef.current.stop(); } catch (e) {}
-        }
-      };
       const resumeAfterSpeaking = () => {
         setSpeaking(false);
         if (callModeRef.current) {
@@ -157,9 +153,31 @@ export default function Assistant() {
           setTimeout(() => startRecognition("wake"), 300);
         }
       };
-      utter.onend = resumeAfterSpeaking;
-      utter.onerror = resumeAfterSpeaking;
-      window.speechSynthesis.speak(utter);
+      // Chrome silently drops an utterance queued in the same tick as
+      // cancel() — a short delay avoids that race so speech reliably fires.
+      setTimeout(() => {
+        try {
+          const utter = new SpeechSynthesisUtterance(clean);
+          utter.rate = 1.03;
+          utter.pitch = 0.92;
+          utter.lang = languageRef.current;
+          utter.onstart = () => {
+            setSpeaking(true);
+            if (recognitionRef.current) {
+              try { recognitionRef.current.stop(); } catch (e) {}
+            }
+          };
+          utter.onend = resumeAfterSpeaking;
+          utter.onerror = (ev) => {
+            console.warn("speech synthesis error", ev.error);
+            setError("Voice reply failed to play — check your device isn't on silent/mute, or try again.");
+            resumeAfterSpeaking();
+          };
+          window.speechSynthesis.speak(utter);
+        } catch (e) {
+          setSpeaking(false);
+        }
+      }, 80);
     } catch (e) {
       setSpeaking(false);
     }
@@ -445,9 +463,25 @@ export default function Assistant() {
           </span>
           <h1 className="font-display font-medium text-lg sm:text-xl tracking-tight truncate text-text">{name}</h1>
         </div>
-        <button onClick={() => setSettingsOpen(true)} aria-label="Settings" className="text-faint hover:text-muted transition-colors p-1">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {synthSupported && (
+            <button
+              onClick={toggleVoiceOut}
+              aria-label={voiceOut ? "Mute voice replies" : "Enable voice replies"}
+              className="transition-colors p-1.5"
+              style={{ color: voiceOut ? "#FF6B35" : "#5C5A5C" }}
+            >
+              {voiceOut ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M11 5 6 9H2v6h4l5 4V5zM19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M11 5 6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/></svg>
+              )}
+            </button>
+          )}
+          <button onClick={() => setSettingsOpen(true)} aria-label="Settings" className="text-faint hover:text-muted transition-colors p-1.5">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+        </div>
       </div>
 
       {/* Quick launch */}
